@@ -1,0 +1,18 @@
+# Security / Secrets
+.env
+.streamlit/secrets.toml
+o365_token.txt
+service_acount.json
+service_account.json
+
+# Virtual Environments
+venv/
+env/
+.venv/
+
+# Python Cache
+__pycache__/
+*.pyc
+
+# OS generated files
+.DS_Store

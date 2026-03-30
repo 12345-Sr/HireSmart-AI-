@@ -1,0 +1,8 @@
+msal
+python-dotenv
+streamlit
+pandas
+PyPDF2
+openpyxl
+O365
+langchain-groq
