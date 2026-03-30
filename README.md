@@ -57,13 +57,4 @@
 
 ---
 
-## 📋 Prerequisites
-
-To run this application, you will need:
-1. **Groq API Key:** [Get it here](https://console.groq.com/).
-2. **Microsoft Azure App Registration:**
-   * **Client ID**, **Tenant ID**, and **Client Secret**.
-   * API Permissions: `Files.Read.All` (Admin Consent Required).
-
----
 
