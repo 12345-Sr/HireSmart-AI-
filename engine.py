@@ -84,22 +84,37 @@ class ResumeEngine:
             print(f"PDF Extraction error: {e}")
             return ""
 
-    def get_jd_category(self, jd_text):
-        """AI determines the primary skill category."""
-        prompt = f"""
-        Identify the primary programming language or skill category for this Job Description (e.g., Java, Python, PHP, React). 
-        Return ONLY the single word representing the category. Do not include punctuation or sentences.
+def get_jd_category(self, jd_text):
+    """AI determines the primary skill category to target specific subfolders."""
+    # We use a more forceful 'System' style prompt for Gemini
+    prompt = f"""
+    You are a classification tool. Analyze the Job Description below.
+    Identify the main technology or programming language (e.g., Java, Python, React, PHP).
+    
+    RULES:
+    - Output ONLY the single word.
+    - No punctuation, no sentences, no explanations.
+    - If unsure, output 'general'.
+
+    JD Content:
+    {jd_text[:1500]}
+    """
+    try:
+        # Using a list of messages is more stable for Gemini
+        from langchain_core.messages import HumanMessage
+        res = self.llm.invoke([HumanMessage(content=prompt)])
         
-        JD Content:
-        {jd_text[:1000]}
-        """
-        try:
-            res = self.llm.invoke(prompt)
-            # Gemini response content is accessed via .content
-            category = re.sub(r'[^a-zA-Z0-9]', '', res.content.strip().lower())
-            return category
-        except:
+        # Aggressive cleaning: remove all non-alphanumeric and strip whitespace
+        category = re.sub(r'[^a-zA-Z0-9]', '', res.content.strip().lower())
+        
+        if not category:
             return None
+            
+        print(f"🔍 AI detected category: {category}")
+        return category
+    except Exception as e:
+        print(f"❌ Category detection failed: {e}")
+        return None
 
     def load_resumes_from_onedrive(self, root_folder="Resumes", target_category=None):
         account = self.get_authenticated_account()
