@@ -84,37 +84,42 @@ class ResumeEngine:
             print(f"PDF Extraction error: {e}")
             return ""
 
-def get_jd_category(self, jd_text):
-    """AI determines the primary skill category to target specific subfolders."""
-    # We use a more forceful 'System' style prompt for Gemini
-    prompt = f"""
-    You are a classification tool. Analyze the Job Description below.
-    Identify the main technology or programming language (e.g., Java, Python, React, PHP).
+    def get_jd_category(self, jd_text):
+        """
+        Identifies the core technology/tool from a JD even without explicit 'Primary' labels.
+        """
+        prompt = f"""
+        Analyze this Job Description and identify the single most important technical tool or platform required.
     
-    RULES:
-    - Output ONLY the single word.
-    - No punctuation, no sentences, no explanations.
-    - If unsure, output 'general'.
+        RULES:
+        1. If a 'Primary Skill' is listed, pick that.
+        2. Otherwise, pick the most specialized technical tool mentioned (e.g., Snowflake, Matillion, AWS, Salesforce).
+        3. Ignore generic terms like 'Communication', 'Remote', or 'Full-time'.
+        4. Output ONLY the single word (the tool name). No sentences.
+    
+        JOB DESCRIPTION:
+        {jd_text[:2000]}
+        """
+        try:
+            from langchain_core.messages import HumanMessage
+            # Use Gemini to extract the core tool
+            res = self.llm.invoke([HumanMessage(content=prompt)])
+        
+            # Clean the output string
+            category = res.content.strip().lower()
+            # Remove any non-alphanumeric characters
+            category = re.sub(r'[^a-z0-9]', '', category)
+        
+            # Safety check: if the AI returns too many words, it failed
+            if len(category.split()) > 1:
+                return None
 
-    JD Content:
-    {jd_text[:1500]}
-    """
-    try:
-        # Using a list of messages is more stable for Gemini
-        from langchain_core.messages import HumanMessage
-        res = self.llm.invoke([HumanMessage(content=prompt)])
+            print(f"✅ Target Folder Identified: {category}")
+            return category
         
-        # Aggressive cleaning: remove all non-alphanumeric and strip whitespace
-        category = re.sub(r'[^a-zA-Z0-9]', '', res.content.strip().lower())
-        
-        if not category:
+        except Exception as e:
+            print(f"❌ Extraction Error: {e}")
             return None
-            
-        print(f"🔍 AI detected category: {category}")
-        return category
-    except Exception as e:
-        print(f"❌ Category detection failed: {e}")
-        return None
 
     def load_resumes_from_onedrive(self, root_folder="Resumes", target_category=None):
         account = self.get_authenticated_account()
