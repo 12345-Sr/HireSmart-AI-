@@ -124,60 +124,56 @@ class ResumeEngine:
     def load_resumes_from_onedrive(self, root_folder="Resumes", target_category=None):
         account = self.get_authenticated_account()
         user_email = get_secret("O365_USER_EMAIL")
-        
-        if not user_email:
-            raise Exception("O365_USER_EMAIL is missing.")
-
         storage = account.storage(resource=user_email)
         drive = storage.get_default_drive()
 
+        # 1. Locate Root Folder
         search_res = drive.search(root_folder)
         parent_folder = next((item for item in search_res if item.is_folder and item.name.lower() == root_folder.lower()), None)
-        
+    
         if not parent_folder:
-            root_items = drive.get_root_folder().get_items()
-            parent_folder = next((item for item in root_items if item.is_folder and item.name.lower() == root_folder.lower()), None)
+            raise Exception(f"Folder '{root_folder}' not found in OneDrive.")
 
-        if not parent_folder:
-            raise Exception(f"Root folder '{root_folder}' not found.")
-
+        # 2. Determine Search Folder
         final_target_folder = parent_folder
+
         if target_category:
-            sub_items = parent_folder.get_items()
+            print(f"🎯 Searching for subfolder matching: {target_category}")
+            sub_items = parent_folder.get_items() # Fetch subfolders
+
             for item in sub_items:
-                if item.is_folder and item.name.lower() == target_category.lower():
+                if item.is_folder and target_category.lower() in item.name.lower():
                     final_target_folder = item
+                    print(f"✅ Target found: {item.name}")
                     break
-        
+    
+        # 3. CRITICAL FIX: Ensure we are actually getting items
         documents = []
-        for item in final_target_folder.get_items():
-            if not item.is_file or not item.name.lower().endswith(('.pdf', '.txt')):
-                continue
-            
+        # Use a limit if the folder is massive to prevent timeouts
+        items = final_target_folder.get_items() 
+    
+        item_count = 0
+        for item in items:
+            if item.is_file and item.name.lower().endswith(('.pdf', '.txt')):
+                item_count += 1
             try:
-                url = f"https://graph.microsoft.com/v1.0/users/{user_email}/drive/items/{item.object_id}/content"
-                response = item.con.get(url)
+                # Use the content property directly if possible, or the download URL
+                content = item.get_content() 
                 
-                if response.status_code == 200:
-                    file_content = response.content
-                    text = ""
-                    if item.name.lower().endswith('.pdf'):
-                        text = self.extract_text_from_bytes(file_content)
-                    else:
-                        text = file_content.decode('utf-8', errors='ignore')
-                    
-                    if text:
-                        documents.append({
-                            "page_content": text,
-                            "metadata": {
-                                "filename": item.name, 
-                                "web_url": item.web_url, 
-                                "id": item.object_id
-                            }
-                        })
+                if item.name.lower().endswith('.pdf'):
+                    text = self.extract_text_from_bytes(content)
+                else:
+                    text = content.decode('utf-8', errors='ignore')
+                
+                if text:
+                    documents.append({
+                        "page_content": text,
+                        "metadata": {"filename": item.name, "url": item.web_url}
+                    })
             except Exception as e:
-                print(f"❌ Skipping {item.name}: {e}")
-        
+                print(f"Could not read {item.name}: {e}")
+
+        print(f"📂 Found {len(documents)} valid resumes in '{final_target_folder.name}'")
         return documents
 
     def get_match_analysis(self, jd_text, resume_text):
