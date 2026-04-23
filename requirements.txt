@@ -5,4 +5,6 @@ pandas
 PyPDF2
 openpyxl
 O365
-langchain-groq
+langchain
+langchain-google-genai
+google-generativeai
