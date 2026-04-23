@@ -29,7 +29,7 @@ class ResumeEngine:
             raise ValueError("GOOGLE_API_KEY is missing.")
         
         self.llm = ChatGoogleGenerativeAI(
-            model="models/gemini-1.5-flash", 
+            model="gemini-2.0-flash", 
             google_api_key=google_key,
             temperature=0
         )
