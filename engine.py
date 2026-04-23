@@ -29,7 +29,7 @@ class ResumeEngine:
             raise ValueError("GOOGLE_API_KEY is missing.")
         
         self.llm = ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash",
+            model="gemini-1.5-flash", 
             google_api_key=google_key,
             temperature=0
         )
@@ -50,6 +50,7 @@ class ResumeEngine:
         )
 
     def _clean_json_output(self, text):
+        """Sanitizes LLM output by removing markdown and extra text."""
         text = re.sub(r'```json|```', '', text).strip()
         match = re.search(r'\{.*\}', text, re.DOTALL)
         if match:
@@ -60,7 +61,13 @@ class ResumeEngine:
         if self.account.authenticate():
             return self.account
         else:
-            raise Exception("O365 Authentication Failed. Verify Azure App Permissions.")
+            raise Exception("Service Principal Authentication Failed. Check Azure Client Secret and Tenant ID.")
+
+    def check_auth_status(self):
+        try:
+            return self.account.authenticate()
+        except:
+            return False
 
     def extract_text_from_bytes(self, pdf_bytes):
         try:
@@ -71,86 +78,67 @@ class ResumeEngine:
                 if t: text += t + "\n"
             return text.strip()
         except Exception as e:
-            st.error(f"PDF Parsing Error: {e}")
+            st.error(f"PDF Extraction error: {e}")
             return ""
 
     def get_jd_category(self, jd_text):
-        """Extracts core tool/skill for folder matching."""
-        if not jd_text or len(jd_text.strip()) < 10:
-            return None
-
+        """Identifies the core technology/tool for folder matching."""
         prompt = f"""
-        Identify the most important technical tool/platform in this JD.
-        OUTPUT ONLY THE SINGLE WORD. 
-        Example: Matillion
+        Analyze this Job Description and identify the single most important technical tool (e.g., Matillion, Snowflake, Java).
+        Output ONLY the single word. No sentences or punctuation.
         
         JD: {jd_text[:1500]}
         """
         try:
+            # Using HumanMessage ensures the prompt is handled correctly by Gemini
             res = self.llm.invoke([HumanMessage(content=prompt)])
             category = res.content.strip().lower()
-            category = re.sub(r'[^a-z0-9]', '', category)
+            category = re.sub(r'[^a-z0-9]', '', category) # Clean string for folder matching
+            
             if category:
-                st.write(f"🔍 AI detected target skill: **{category}**")
+                st.write(f"🔍 AI detected target skill folder: **{category}**")
                 return category
+            return None
         except Exception as e:
-            st.warning(f"Category extraction failed: {e}")
-        return None
+            st.error(f"❌ Skill Extraction Error: {e}")
+            return None
 
     def load_resumes_from_onedrive(self, root_folder_name="Resumes", target_category=None):
-        """Direct traversal method to find resumes."""
+        """Directly traverses OneDrive to find resumes in specific folders."""
         account = self.get_authenticated_account()
         user_email = get_secret("O365_USER_EMAIL")
         storage = account.storage(resource=user_email)
         drive = storage.get_default_drive()
 
-        # 1. Direct Root Scan (More reliable than .search())
+        # 1. Find Root Folder via iteration (More reliable than .search())
         root_items = drive.get_root_folder().get_items()
-        parent_folder = None
-        
-        for item in root_items:
-            if item.is_folder and item.name.lower() == root_folder_name.lower():
-                parent_folder = item
-                break
-        
+        parent_folder = next((item for item in root_items if item.is_folder and item.name.lower() == root_folder_name.lower()), None)
+    
         if not parent_folder:
-            st.error(f"❌ Root folder '{root_folder_name}' not found in OneDrive.")
+            st.error(f"❌ Folder '{root_folder_name}' not found in OneDrive root.")
             return []
 
-        # 2. Skill-Based Folder Discovery
+        # 2. Optimization: Skill-specific folder jumping
         final_target_folder = parent_folder
         if target_category:
             sub_items = parent_folder.get_items()
-            found_subfolder = None
-            
-            # Debug: See what's inside the Resumes folder
-            all_subfolders = [i.name for i in sub_items if i.is_folder]
-            
             for item in sub_items:
                 if item.is_folder and target_category.lower() in item.name.lower():
-                    found_subfolder = item
+                    final_target_folder = item
+                    st.info(f"📂 Accessing Subfolder: **{item.name}**")
                     break
-            
-            if found_subfolder:
-                final_target_folder = found_subfolder
-                st.info(f"📂 Entering Folder: **{found_subfolder.name}**")
-            else:
-                st.warning(f"⚠️ No subfolder found for '{target_category}'. Searching root.")
-                st.write(f"Available folders: {', '.join(all_subfolders)}")
-
-        # 3. File Extraction
+    
+        # 3. Fetch and Parse Files
         documents = []
-        files = final_target_folder.get_items()
-        
-        for file in files:
-            # Case-insensitive extension check
-            if file.is_file and file.name.lower().endswith(('.pdf', '.txt')):
+        items = final_target_folder.get_items() 
+    
+        for item in items:
+            # Check for PDF or TXT files
+            if item.is_file and item.name.lower().endswith(('.pdf', '.txt')):
                 try:
-                    # Use get_content() for O365 library
-                    content = file.get_content()
+                    content = item.get_content() 
                     
-                    text = ""
-                    if file.name.lower().endswith('.pdf'):
+                    if item.name.lower().endswith('.pdf'):
                         text = self.extract_text_from_bytes(content)
                     else:
                         text = content.decode('utf-8', errors='ignore')
@@ -158,22 +146,22 @@ class ResumeEngine:
                     if text.strip():
                         documents.append({
                             "page_content": text,
-                            "metadata": {"filename": file.name, "url": file.web_url}
+                            "metadata": {"filename": item.name, "url": item.web_url}
                         })
                 except Exception as e:
-                    print(f"Error reading {file.name}: {e}")
+                    st.warning(f"Could not read {item.name}: {e}")
 
         if not documents:
-            st.warning(f"Empty folder: No valid resumes found in '{final_target_folder.name}'.")
+            st.warning(f"No resumes found in path: {final_target_folder.name}")
         else:
-            st.success(f"✅ Successfully loaded {len(documents)} resumes.")
-            
+            st.success(f"✅ Loaded {len(documents)} resumes from {final_target_folder.name}")
+
         return documents
 
     def get_match_analysis(self, jd_text, resume_text):
         """Analyzes JD vs Resume using Gemini."""
         prompt = f"""
-        Act as a recruiter. Compare the Resume with the JD.
+        Act as a Technical Recruiter. Compare the Resume with the Job Description (JD).
         Return raw JSON ONLY.
         
         {{ 
@@ -193,5 +181,6 @@ class ResumeEngine:
             res = self.llm.invoke([HumanMessage(content=prompt)])
             clean_json = self._clean_json_output(res.content)
             return json.loads(clean_json)
-        except Exception:
+        except Exception as e:
+            st.error(f"Gemini Analysis error: {e}")
             return {"candidate_name": "Error", "match_percentage": 0}
